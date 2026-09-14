@@ -3,7 +3,7 @@
 # ===========================================================================================================
 # Project: Quanser Car "Class Hopper"
 # Contributers: Alex Sanna, Matthew Baldivino, Reyna Nava
-# Last Update: 02/06/2025 (by Reyna)
+# Last Update: 07/08/2025 (by Reyna)
 #  
 # Description:
 #   Run a QCar drive session to recieve images from QCar camera's and the respective steering and throttle
@@ -19,6 +19,7 @@
 from pal.utilities.vision import Camera2D
 from pal.products.qcar import QCarRealSense
 from pal.products.qcar import QCar, QCarRealSense
+from pal.utilities.vision import Camera3D
 
 # OS tasks + threading + communication
 import os
@@ -37,6 +38,7 @@ import cv2
 PORT = 38822  # Port to listen on (non-privileged ports are > 1023)
 
 # initial QCAR variables
+global max_throttle, min_throttle, max_sterring, min_steering
 max_throttle = 0.2
 min_throttle = -0.2
 max_steering = 0.5
@@ -51,6 +53,7 @@ stopthread = False
 
 # setup + validate camera setup
 CAMERA_FRONT = Camera2D(cameraId="3",frameWidth=420,frameHeight=220,frameRate=30)
+#CAMERA_FRONT = Camera3D(mode='RGB', frameWidthRGB=1280,frameHeightRGB=720,frameRateRGB=30.0)
 if CAMERA_FRONT is None:
     print("Error setting up camera front")
     exit()
@@ -63,9 +66,10 @@ myCar = QCar(readMode=0)
 
 # folder setup
 folder_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-path = "/media/images/"
+path = "./images/"
 full_folder_path = os.path.join(path, folder_name)
 os.makedirs(full_folder_path)  
+print("Image directory created")
 
 
 # = drive ===================================================================================================
@@ -88,7 +92,7 @@ os.makedirs(full_folder_path)
 def drive():
 
     print("Driving Starting...")
-    global throttle, steering, reverse, image_skipper
+    global throttle, steering, reverse, image_skipper, max_throttle, min_throttle
 
      #file management for memory purposes
     catalog = open(r"images_catalogs.txt", "a")
@@ -101,20 +105,20 @@ def drive():
     
     # setup socket connection
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(('', PORT))
+        #s.bind(('10.110.129.185', PORT))
+        s.bind(('192.168.1.132',PORT))
         s.setblocking(False)
         global stopthread
 
         while True:
-            #print("ITERATION")
             if stopthread:
                 break
 
             try:
+                #print("Waiting for UDP pckt")
                 data = s.recvfrom(100)[0].decode('utf-8')
-                #print(data)
+                #print("Recieived UDP pckt")
                 if not data:
-                    #print("NOT DATA")
                     pass
 
                 packet = payload.payload_handler(data)
@@ -136,13 +140,12 @@ def drive():
                         continue
                     
                     event = int(buffer[1])
-                    #print(event)
 
                     if event == 1536:
                         #IF Axis is Steering Wheel
-                        #print(float(buffer[2]))
+                        #print("Button Pressed ID:", float(buffer[2]))
                         if float(buffer[2]) == 0:
-                            steer = (-1* float(buffer[3])) / 1.5
+                            steer = (-1* float(buffer[3])) / 0.75
                             if abs(steering - steer) < 0.05:
                                 continue
 
@@ -160,7 +163,7 @@ def drive():
                         elif float(buffer[2]) == 1:
                             
                             th = (float(buffer[3])) / 2 - 0.5
-                            throttle = th * max_throttle
+                            throttle = th * max_throttle * 0.4
                         
                         #IF Axis is Brake
                         elif float(buffer[2]) == 2:
@@ -168,7 +171,6 @@ def drive():
                             #Implement Brake algorithm
 
                     if event == 1539:
-                        #Sprint(float(buffer[2]))
                         if float(buffer[2]) == 5:           # Reverse Trigger
                             print("Reverse Triggered")
                             reverse = True
@@ -213,8 +215,9 @@ def drive():
                             LEDs[7] = 1 if LEDs[7] == 0 else 0
                             LEDs[4] = 1 if LEDs[4] == 0 else 0
                             
-                        elif float(buffer[2]) == 10:
-                            print("Saving and shutting down.")
+                        elif float(buffer[2]) == 10:        # XBOX button
+                            print("Recording last index!")
+                            print("SHUTTING DOWN !!")
                             catalog.close()
                             tracker.close()
                             print("index upon shutdown: " + str(global_count))
@@ -243,29 +246,20 @@ def drive():
                 if throttle != 0  and image_skipper % 1000 == 0:
                     camPreview(["front"], global_count, steering, throttle, catalog)
                     global_count = global_count+1
+                    
                 image_skipper +=1
 
     print("Terminated Driving")
     
     
 # = camPreview  =============================================================================================
-# Description:
-#  
-#
-# Requires:
-#   snapshot()
-#  
-# Notes:
-#  snapshot() responsible for pre-processing the data using lane_detection
-#   
-#
 # ===========================================================================================================
 def camPreview(camIDs, global_count, steering, throttle, catalog):
     if int(global_count) >= 0:
         data = str(global_count) + ", "
 
         if "front" in camIDs:
-            CAMERA_FRONT.read()
+            CAMERA_FRONT.read();
             if CAMERA_FRONT.imageData is not None:
                 #snapshot function will take a picture
                 snapshot(CAMERA_FRONT.imageData, global_count)
@@ -336,14 +330,13 @@ def snapshot(imageData, global_count):
  
     # enforce color image
     #img = cv2.cvtColor(imageData,cv2.COLOR_BGR2RGB)
-    img = imageData
     # pre-process the image
     # uncomment this to do preprocessing in real time
     #img = identify_lane(img)
-
     # Create the new folder
-
     #write the image to the file at path specified above
+    
+    img = imageData
     img_name = 'sample_{}.jpg'.format(str(global_count)) 
     print("Saving Image")
     cv2.imwrite(os.path.join(full_folder_path, img_name), img)

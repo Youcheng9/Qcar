@@ -59,10 +59,10 @@ def drive():
     rear_cam = False
     right_cam = False
     left_cam = False
-    global throttle, steering, reverse, currentGear, speeds
+    global throttle, steering, reverse, currentGear, speeds, max_throttle, min_throttle
     
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind(('', PORT))
+        s.bind(('0.0.0.0', PORT))
         global stopthread
         
         while True:
@@ -129,6 +129,7 @@ def drive():
                     
                     #IF Axis is Brake
                     elif float(buffer[2]) == 2:
+                        toggle_led(4)
                         continue 
                         #Implement Brake algorithm
 
@@ -157,6 +158,7 @@ def drive():
                         print("1st Gear Selected")
                         max_throttle = .075
                         reverse = False
+                        LEDs[0] = 1
                     elif float(buffer[2]) == 13:
                         # First Gear Selected 
                         print("2nd Gear Selected")
@@ -188,7 +190,11 @@ def drive():
                         LEDs[4] = 1 if LEDs[4] == 0 else 0
                     elif float(buffer[2]) == 1:
                         print("Right Cam Flipped")
-                       
+                    elif float(buffer[2]) == 2:
+                        print("REVERSE ACTIVATED")
+                        min_throttle = -.075
+                        max_throttle = .075
+                        reverse = True
                 if reverse:
                     if throttle > 0:
                         throttle *= -1
@@ -205,7 +211,20 @@ def drive():
                 print(e)
 
     print("Terminated Driving")
-    
+
+def toggle_led(ledNum):
+    try:
+        while True:
+            for i in range(8):
+                if i == ledNum:
+                    LEDs[i] = 1
+                else:
+                    LEDs[i] = 0
+                myCar.write(throttle=0, steering=0, LEDs=LEDs)
+                time.sleep(0.5)
+
+    finally:
+        myCar.write(throttle=0, steering=0, LEDs=np.zeros(8))
     
 def identify_lane(frame):
 
@@ -223,10 +242,11 @@ def camPreview(camIDs = ["front"]):
             camera_front.read()
             if camera_front is not None:
                 #cv2.namedWindow("Camera Front", cv2.WINDOW_NORMAL)
-                #cv2.resizeWindow("Camera Front", 900, 900)
+                cv2.resizeWindow("Camera Front", 960, 540)
                 image = camera_front.imageData
+                image_scaled = cv2.resize(image, (960, 540))
                 #img = detect_lanes(image)
-                cv2.imshow("Camera Front", image)
+                cv2.imshow("Camera Front", image_scaled)
                 
                 frame = image
                 height, width = frame.shape[:2]
@@ -285,14 +305,14 @@ cameraAccess = threading.Thread(target=camPreview,args=[["front"]])
 
 def main():
     global keyControl, cameraAccess
-    #keyControl = threading.Thread(target=drive)
+    keyControl = threading.Thread(target=drive)
     #cameraAccess = threading.Thread(target=camPreview,args=[["front"]])
     #rear_camera_view = threading.Thread(target=camPreview,args=["back"])
     network = threading.Thread(target=get_wifi_networks)
     
     try:
         keyControl.start()
-        cameraAccess.start()
+        #cameraAccess.start()
         network.start()
     except KeyboardInterrupt:
             myCar.terminate()
