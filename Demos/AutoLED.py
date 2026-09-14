@@ -44,10 +44,14 @@ min_steering = -0.5
 MINIMUM_THROTTLE_EPSILON = 0.0000001
 counter = 0
 
+blink_state = False
+last_blink_time = 0
+blink_interval = 0.2
+
 # Initialize car control values
 throttle = 0.0
 steering = 0.0
-LEDs = np.array([0] * 8)
+LEDs = np.zeros(8)
 
 # Steering classes for model prediction via "One Hot Encoding"
 steering_classes = [-0.5, -0.4375, -0.375, -0.3125, -0.25, -0.1875, -0.125, -0.0625, 0, 0.0625, 0.125, 0.1875, 0.25, 0.3125, 0.375, 0.4375, 0.5]
@@ -108,6 +112,27 @@ def getModelSteering(model, input_details, output_details):
     counter += 1
     print(f"In Model Mode  Counter = {counter}")
     return steering_classes[class_assign]
+
+def blinker(steering):
+    global blink_state, last_blink_time, LEDs
+
+    now = time.time()
+
+    # turn all off first
+    LEDs[0] = 0   # left
+    LEDs[1] = 0   # right
+
+    if abs(steering) > 0.1:
+        if now - last_blink_time >= blink_interval:
+            blink_state = not blink_state
+            last_blink_time = now
+
+        if steering > 0:
+            LEDs[0] = 1 if blink_state else 0
+        elif steering < 0:
+            LEDs[1] = 1 if blink_state else 0
+    else:
+        blink_state = False
 
 # Main control loop
 def main():
@@ -182,6 +207,7 @@ def main():
                 throttle = 0.075
         
         # Apply control commands to the car
+        blinker(steering)
         myCar.write(throttle=throttle, steering=steering, LEDs=LEDs)
         time.sleep(0.1)
 

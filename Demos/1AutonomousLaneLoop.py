@@ -141,7 +141,9 @@ def Drive():
         This is where you specify what model you would like to use. TFLITE recommended. 
         Models should be stored in the Models/ folder in the Demos/ folder. Case Sens.
     '''
-    driving_model = loadModel("Models/Mar12Class.tflite")
+    #driving_model = loadModel("Models/Mar12Class.tflite")
+    driving_model = loadModel("Models/qcar_steering_tf231.tflite")
+    print("Model is loaded")
     input_details = driving_model.get_input_details()
     output_details = driving_model.get_output_details()
     
@@ -149,8 +151,28 @@ def Drive():
     # setup screen size for pygame display control panel. 
     screen_width = 800
     screen_height = 600
-    screen = pygame.display.set_mode((screen_width, screen_height))
-    pygame.display.set_caption("QCar Autonomous Demo")
+    # screen = pygame.display.set_mode((screen_width, screen_height))
+    input_details = driving_model.get_input_details()
+    print("got input details")
+
+    output_details = driving_model.get_output_details()
+    print("got output details")
+
+    screen_width = 800
+    screen_height = 600
+
+    print("before set_mode")
+    # screen = pygame.display.set_mode((screen_width, screen_height))
+    print("after set_mode")
+
+    # pygame.display.set_caption("QCar Autonomous Demo")
+    # pygame.display.flip()
+
+    #print("screen:", screen)
+    print("display driver:", pygame.display.get_driver())
+    print("pygame display initialized?", pygame.display.get_init())
+    print("caption set")
+
 
     # CAR PARAMS: set up +- increment and maximum
     deceleration_increment = .00001
@@ -421,4 +443,9 @@ def loadModel(filename):
     return driving_model
         
         
-Drive()
+try:
+    Drive()
+except KeyboardInterrupt:
+    print("Stopping QCar...")
+    myCar.read_write_std(throttle=0.0, steering=0.0, LEDs=np.zeros(8))
+    myCar.terminate()
