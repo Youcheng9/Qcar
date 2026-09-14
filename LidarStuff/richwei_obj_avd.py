@@ -34,7 +34,7 @@ lidar_device = Lidar(type='RPLidar')
 
 # Control variables
 steering = 0.0
-throttle = 0.08  # Ensure movement starts
+throttle = 0.07  # Ensure movement starts
 stop_threads = False
 avoid_obstacles = True
 
