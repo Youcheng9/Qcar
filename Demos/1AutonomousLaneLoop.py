@@ -135,14 +135,16 @@ myCar = QCar(readMode=0)
 # Main Program for driving the car. 
 def Drive():
     print("Driving started.")
+    os.environ["SDL_VIDEODRIVER"] = "dummy"
+
     pygame.init()
 
     '''
         This is where you specify what model you would like to use. TFLITE recommended. 
         Models should be stored in the Models/ folder in the Demos/ folder. Case Sens.
     '''
-    #driving_model = loadModel("Models/Mar12Class.tflite")
-    driving_model = loadModel("Models/qcar_steering_tf231.tflite")
+    driving_model = loadModel("Models/Mar12Class.tflite")
+    #driving_model = loadModel("Models/qcar_steering_tf231.tflite")
     print("Model is loaded")
     input_details = driving_model.get_input_details()
     output_details = driving_model.get_output_details()
@@ -162,13 +164,13 @@ def Drive():
     screen_height = 600
 
     print("before set_mode")
-    # screen = pygame.display.set_mode((screen_width, screen_height))
+    screen = pygame.display.set_mode((screen_width, screen_height))
     print("after set_mode")
 
-    # pygame.display.set_caption("QCar Autonomous Demo")
-    # pygame.display.flip()
+    pygame.display.set_caption("QCar Autonomous Demo")
+    pygame.display.flip()
 
-    #print("screen:", screen)
+    print("screen:", screen)
     print("display driver:", pygame.display.get_driver())
     print("pygame display initialized?", pygame.display.get_init())
     print("caption set")
