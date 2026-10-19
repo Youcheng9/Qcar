@@ -88,6 +88,7 @@ def main():
 
     steering = pedal = brake = 0.0
     max_throttle, reverse = .075, False
+    throttle_scale = 0.4 if args.control == 'xbox' else 1.0
     period, next_sample = 1.0 / args.hz, time.time()
     threading.Thread(target=lidar_loop, daemon=True).start()
 
@@ -181,7 +182,7 @@ def main():
                     pedal, brake, steering = 0.0, 0.0, 0.0
 
             stop = brake > BRAKE_STOP
-            throttle = 0.0 if stop else pedal * max_throttle * 0.4 * (-1 if reverse else 1)
+            throttle = 0.0 if stop else pedal * max_throttle * throttle_scale * (-1 if reverse else 1)
             car.write(throttle=throttle, steering=steering, LEDs=LEDs)
 
             now = time.time()
