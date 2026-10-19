@@ -48,6 +48,8 @@ parser.add_argument('--tag', default='normal',
                     help='scenario: normal, obstacle, person, lighting, camera_fail, lidar_fail, ...')
 parser.add_argument('--hz', type=float, default=10.0, help='samples per second')
 parser.add_argument('--out', default=os.path.join(HERE, 'data'))
+parser.add_argument('--control', choices=('xbox', 'wasd'), default='xbox',
+                    help='control source: xbox wheel over UDP or local WASD keyboard')
 args = parser.parse_args()
 
 camera = Camera2D(cameraId="3", frameWidth=420, frameHeight=220, frameRate=30)
@@ -86,51 +88,88 @@ def main():
     period, next_sample = 1.0 / args.hz, time.time()
     threading.Thread(target=lidar_loop, daemon=True).start()
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('', PORT))
-    sock.settimeout(0.005)
+    sock = None
+    pygame = None
+    screen = clock = None
+    if args.control == 'xbox':
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(('', PORT))
+        sock.settimeout(0.005)
+    else:
+        try:
+            import pygame
+        except ImportError:
+            raise SystemExit('WASD mode requires pygame: install it in the QCar Python environment')
+        pygame.init()
+        screen = pygame.display.set_mode((640, 180))
+        pygame.display.set_caption('QCar SensorFusion WASD control')
+        clock = pygame.time.Clock()
+        print('WASD mode: W forward, S brake, A/D steer, R reverse, F forward, Q quit')
+
     try:
         while running:
-            try:
-                packet = payload.payload_handler(sock.recvfrom(100)[0].decode('utf-8'))
-                buffer = []
-                # |Controller ID 4|Event 4|Event Dimension 8|Event Value 8|
-                if any(packet.read(buffer, size) == -1 for size in (4, 4, 8, 8)):
-                    print('Warning: Packet Length Too short')
-                    continue
-                event, dim, value = int(buffer[1]), int(float(buffer[2])), float(buffer[3])
+            if args.control == 'xbox':
+                try:
+                    packet = payload.payload_handler(sock.recvfrom(100)[0].decode('utf-8'))
+                    buffer = []
+                    # |Controller ID 4|Event 4|Event Dimension 8|Event Value 8|
+                    if any(packet.read(buffer, size) == -1 for size in (4, 4, 8, 8)):
+                        print('Warning: Packet Length Too short')
+                        continue
+                    event, dim, value = int(buffer[1]), int(float(buffer[2])), float(buffer[3])
 
-                if event == 1536:                       # axis motion
-                    if dim == 0:                        # wheel
-                        steer = float(np.clip(-value / 0.75, -MAX_STEERING, MAX_STEERING))
-                        if abs(steer - steering) >= 0.05 or abs(steer) == MAX_STEERING:
-                            steering = steer
-                    elif dim == 1:                      # throttle pedal: 1 released, -1 floored
-                        pedal = (1 - value) / 2
-                    elif dim == 2:                      # brake pedal, same range
-                        brake = (1 - value) / 2
-                elif event == 1539:                     # button down
-                    if dim == 5:
-                        print('Reverse Triggered')
-                        reverse = True
-                    elif dim == 4:
-                        print('Forward Triggered')
-                        reverse = False
-                    elif dim == 0:                      # neutral
-                        steering = pedal = 0.0
-                        reverse = False
-                    elif dim in GEARS:
-                        max_throttle, reverse = GEARS[dim]
-                        print('Gear', dim - 11 if dim > 11 else 'R', 'max_throttle', max_throttle)
-                    elif dim == 6:
-                        LEDs[[4, 6, 7]] = 1 - LEDs[[4, 6, 7]]
-                    elif dim == 10:                     # XBOX button
-                        print('SHUTTING DOWN !!')
-                        break
-            except socket.timeout:
-                pass
-            except (ValueError, UnicodeDecodeError) as e:
-                print('Invalid Packet:', e)
+                    if event == 1536:                       # axis motion
+                        if dim == 0:                        # wheel
+                            steer = float(np.clip(-value / 0.75, -MAX_STEERING, MAX_STEERING))
+                            if abs(steer - steering) >= 0.05 or abs(steer) == MAX_STEERING:
+                                steering = steer
+                        elif dim == 1:                      # throttle pedal: 1 released, -1 floored
+                            pedal = (1 - value) / 2
+                        elif dim == 2:                      # brake pedal, same range
+                            brake = (1 - value) / 2
+                    elif event == 1539:                     # button down
+                        if dim == 5:
+                            print('Reverse Triggered')
+                            reverse = True
+                        elif dim == 4:
+                            print('Forward Triggered')
+                            reverse = False
+                        elif dim == 0:                      # neutral
+                            steering = pedal = 0.0
+                            reverse = False
+                        elif dim in GEARS:
+                            max_throttle, reverse = GEARS[dim]
+                            print('Gear', dim - 11 if dim > 11 else 'R', 'max_throttle', max_throttle)
+                        elif dim == 6:
+                            LEDs[[4, 6, 7]] = 1 - LEDs[[4, 6, 7]]
+                        elif dim == 10:                     # XBOX button
+                            print('SHUTTING DOWN !!')
+                            break
+                except socket.timeout:
+                    pass
+                except (ValueError, UnicodeDecodeError) as e:
+                    print('Invalid Packet:', e)
+            else:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        running = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_q:
+                            running = False
+                        elif event.key == pygame.K_r:
+                            reverse = True
+                        elif event.key == pygame.K_f:
+                            reverse = False
+
+                keys = pygame.key.get_pressed()
+                steering = 0.0
+                if keys[pygame.K_a] and not keys[pygame.K_d]:
+                    steering = MAX_STEERING
+                elif keys[pygame.K_d] and not keys[pygame.K_a]:
+                    steering = -MAX_STEERING
+                pedal = 1.0 if keys[pygame.K_w] else 0.0
+                brake = 1.0 if keys[pygame.K_s] else 0.0
+                clock.tick(60)
 
             stop = brake > BRAKE_STOP
             throttle = 0.0 if stop else pedal * max_throttle * 0.4 * (-1 if reverse else 1)
@@ -158,7 +197,10 @@ def main():
         running = False
         car.write(throttle=0, steering=0, LEDs=np.zeros(8))
         writer.close()
-        sock.close()
+        if sock is not None:
+            sock.close()
+        if pygame is not None:
+            pygame.quit()
         time.sleep(0.1)
         lidar.terminate()
         camera.terminate()
