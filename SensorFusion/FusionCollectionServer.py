@@ -103,9 +103,9 @@ def main():
         terminal_state = termios.tcgetattr(sys.stdin)
         tty.setcbreak(sys.stdin.fileno())
         print('WASD terminal mode: W forward, S brake, A/D steer, R reverse, F forward, Space stop, Q quit')
-        print('Keys are single-key commands; press W repeatedly to continue moving.')
+        print('Each movement command stays active for 5 seconds; press S or Space to stop.')
 
-    key_timeout = 0.35
+    key_timeout = 5.0
     key_deadline = time.time()
 
     try:
@@ -161,13 +161,17 @@ def main():
                     elif key == 'r':
                         reverse = True
                         pedal = 0.0
+                        print('Reverse selected; press W to move backward')
                     elif key == 'f':
                         reverse = False
                         pedal = 0.0
+                        print('Forward selected; press W to move forward')
                     elif key == 'w':
                         pedal, brake = 1.0, 0.0
+                        print('Driving', 'backward' if reverse else 'forward')
                     elif key == 's' or key == ' ':
                         pedal, brake = 0.0, 1.0
+                        print('Brake')
                     elif key == 'a':
                         steering = MAX_STEERING
                     elif key == 'd':
