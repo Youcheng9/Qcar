@@ -18,10 +18,13 @@
 # ===========================================================================================================
 import argparse
 import os
+import select
 import socket
 import sys
 import threading
+import termios
 import time
+import tty
 from datetime import datetime
 
 import cv2  # imported up front: a lazy first import would stall the drive loop mid-run
@@ -89,22 +92,21 @@ def main():
     threading.Thread(target=lidar_loop, daemon=True).start()
 
     sock = None
-    pygame = None
-    screen = clock = None
+    terminal_state = None
     if args.control == 'xbox':
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(('', PORT))
         sock.settimeout(0.005)
     else:
-        try:
-            import pygame
-        except ImportError:
-            raise SystemExit('WASD mode requires pygame: install it in the QCar Python environment')
-        pygame.init()
-        screen = pygame.display.set_mode((640, 180))
-        pygame.display.set_caption('QCar SensorFusion WASD control')
-        clock = pygame.time.Clock()
-        print('WASD mode: W forward, S brake, A/D steer, R reverse, F forward, Q quit')
+        if not sys.stdin.isatty():
+            raise SystemExit('WASD mode needs an interactive terminal; run it from an SSH terminal or local console')
+        terminal_state = termios.tcgetattr(sys.stdin)
+        tty.setcbreak(sys.stdin.fileno())
+        print('WASD terminal mode: W forward, S brake, A/D steer, R reverse, F forward, Space stop, Q quit')
+        print('Keys are single-key commands; press W repeatedly to continue moving.')
+
+    key_timeout = 0.35
+    key_deadline = time.time()
 
     try:
         while running:
@@ -150,26 +152,29 @@ def main():
                 except (ValueError, UnicodeDecodeError) as e:
                     print('Invalid Packet:', e)
             else:
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.01)
+                if ready:
+                    key = sys.stdin.read(1).lower()
+                    key_deadline = time.time() + key_timeout
+                    if key == 'q':
                         running = False
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_q:
-                            running = False
-                        elif event.key == pygame.K_r:
-                            reverse = True
-                        elif event.key == pygame.K_f:
-                            reverse = False
+                    elif key == 'r':
+                        reverse = True
+                        pedal = 0.0
+                    elif key == 'f':
+                        reverse = False
+                        pedal = 0.0
+                    elif key == 'w':
+                        pedal, brake = 1.0, 0.0
+                    elif key == 's' or key == ' ':
+                        pedal, brake = 0.0, 1.0
+                    elif key == 'a':
+                        steering = MAX_STEERING
+                    elif key == 'd':
+                        steering = -MAX_STEERING
 
-                keys = pygame.key.get_pressed()
-                steering = 0.0
-                if keys[pygame.K_a] and not keys[pygame.K_d]:
-                    steering = MAX_STEERING
-                elif keys[pygame.K_d] and not keys[pygame.K_a]:
-                    steering = -MAX_STEERING
-                pedal = 1.0 if keys[pygame.K_w] else 0.0
-                brake = 1.0 if keys[pygame.K_s] else 0.0
-                clock.tick(60)
+                if time.time() > key_deadline:
+                    pedal, brake, steering = 0.0, 0.0, 0.0
 
             stop = brake > BRAKE_STOP
             throttle = 0.0 if stop else pedal * max_throttle * 0.4 * (-1 if reverse else 1)
@@ -199,8 +204,8 @@ def main():
         writer.close()
         if sock is not None:
             sock.close()
-        if pygame is not None:
-            pygame.quit()
+        if terminal_state is not None:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, terminal_state)
         time.sleep(0.1)
         lidar.terminate()
         camera.terminate()
