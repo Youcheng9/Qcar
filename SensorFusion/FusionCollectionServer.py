@@ -104,9 +104,9 @@ def main():
         terminal_state = termios.tcgetattr(sys.stdin)
         tty.setcbreak(sys.stdin.fileno())
         print('WASD terminal mode: W forward, S brake, A/D steer, R reverse, F forward, Space stop, Q quit')
-        print('Each movement command stays active for 5 seconds; press S or Space to stop.')
+        print('Each keypress creates a short control pulse; controls return to zero unless another key is pressed.')
 
-    key_timeout = 5.0
+    key_timeout = 0.25
     key_deadline = time.time()
 
     try:

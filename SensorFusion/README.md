@@ -46,7 +46,7 @@ d['image_ok'], d['lidar_ok']   # False = missing/corrupt sensor (filled with zer
 3. **Drive.** Run `sudo python3 FusionCollectionServer.py --tag normal --control xbox` for the Logitech/Xbox wheel, or `sudo python3 FusionCollectionServer.py --tag normal --control wasd` for a keyboard connected to the QCar. You don't need to edit the server IP, `index_tracker.txt` or `images_catalogs.txt`.
    - Samples are recorded at 10 Hz (`--hz`) while the car is moving, or while the brake is held.
    - **Brake = stop label.** Hold the brake when the car should stop (person or obstacle ahead). The car stops, and the frames are labeled `stop=1`.
-   - The XBOX button or Ctrl+C saves and quits in Xbox mode. In WASD terminal mode, use **W** to drive, **S** or **Space** to brake, **A/D** to steer, **R/F** to select reverse/forward, and **Q** to save and quit. Each movement command lasts 5 seconds. Watch the console for `<-- check sensors`.
+   - The XBOX button or Ctrl+C saves and quits in Xbox mode. In WASD terminal mode, use **W** to drive, **S** or **Space** to brake, **A/D** to steer, **R/F** to select reverse/forward, and **Q** to save and quit. Each keypress creates a short pulse and then returns controls to zero. Watch the console for `<-- check sensors`.
 4. **Check right away.** Run `python3 view_session.py data/<session> --summary`. Look for: Hz ≈ 10, a median skew under ~0.1 s, almost no missing images or scans, and a mix of left and right steering.
 5. Copy `data/` to a PC, for example `scp -r nvidia@<car-ip>:<path>/SensorFusion/data .`. If the folders are root-owned because of sudo, run `sudo chown -R nvidia data` first.
 
