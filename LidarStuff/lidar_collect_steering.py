@@ -39,8 +39,8 @@ stop_threads = False
 
 # Helper function for polar to cartesian conversion
 def polar_to_cartesian(angles, distances):
-    x = distances * np.cos(np.radians(angles))
-    y = distances * np.sin(np.radians(angles))
+    x = distances * np.cos(angles)  # angles are already radians
+    y = distances * np.sin(angles)
     return x, y
 
 # LiDAR function to collect and log data
