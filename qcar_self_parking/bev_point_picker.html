@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BEV Point Picker</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2228; --muted: #5d6773;
+    --border: #d5dae0; --accent: #1f6feb; --marker: #ff2d55; --cross: #00c2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15181c; --panel: #1e2227; --text: #e6e9ed; --muted: #9aa4af;
+            --border: #353b43; --accent: #4c8dff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; max-width: 900px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+           padding: 12px; margin-bottom: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  label { color: var(--muted); }
+  select, input, button, textarea { font: inherit; color: var(--text); background: var(--panel);
+           border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #wrap { overflow: auto; max-width: 100%; border: 1px solid var(--border); border-radius: 6px;
+          background: #000; display: inline-block; }
+  canvas { display: block; cursor: crosshair; image-rendering: pixelated; }
+  #drop { color: var(--muted); padding: 32px; text-align: center; border: 2px dashed var(--border);
+          border-radius: 8px; }
+  #readout { font-family: ui-monospace, Consolas, monospace; min-width: 180px; }
+  table { border-collapse: collapse; width: 100%; max-width: 640px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+  td input { width: 90px; }
+  .mono { font-family: ui-monospace, Consolas, monospace; }
+  textarea { width: 100%; max-width: 640px; height: 170px; font-family: ui-monospace, Consolas, monospace; }
+  .warn { color: #d97706; }
+</style>
+</head>
+<body>
+<h1>Bird's-eye point picker</h1>
+<p class="sub">Open <span class="mono">calib/bev_&lt;side&gt;_undistorted.png</span>, click the centre of each
+floor marker, and type its floor position in metres from the camera's ground point
+(<b>fwd</b> = toward the car's front, rear negative; <b>out</b> = away from the car, positive).
+Then copy or download the text and save it on the car as
+<span class="mono">calib/bev_&lt;side&gt;_points.txt</span>. Nothing leaves your computer.</p>
+
+<div class="panel row">
+  <input type="file" id="file" accept="image/*">
+  <label>Side <select id="side"><option>right</option><option>left</option></select></label>
+  <label>Zoom <select id="zoom"><option>2</option><option>3</option><option selected>4</option>
+    <option>5</option><option>6</option></select></label>
+  <span id="readout">cursor: –</span>
+</div>
+
+<div class="panel">
+  <div id="drop">Choose the image above, or drop it here.</div>
+  <div id="wrap" hidden><canvas id="cv"></canvas></div>
+  <p class="sub" style="margin:8px 0 0">Click = add a point at the cursor · drag a numbered point to move it ·
+    arrow keys nudge the last point by 0.5 px.</p>
+</div>
+
+<div class="panel">
+  <table>
+    <thead><tr><th>#</th><th>u_px</th><th>v_px</th><th>fwd_m</th><th>out_m</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p id="status" class="warn"></p>
+  <div class="row">
+    <button class="primary" id="copy">Copy text</button>
+    <button id="download">Download points file</button>
+    <button id="clear">Clear all</button>
+  </div>
+</div>
+
+<div class="panel">
+  <textarea id="out" readonly></textarea>
+</div>
+
+<script>
+(function () {
+  const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+  const img = new Image();
+  let pts = [];                 // {u, v, fwd, out}
+  let dragging = -1, hover = null;
+
+  const zoom = () => parseInt(document.getElementById("zoom").value, 10);
+  const side = () => document.getElementById("side").value;
+
+  function loadFile(f) {
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = e => { img.src = e.target.result; };
+    r.readAsDataURL(f);
+    const m = /bev_(right|left)/.exec(f.name);
+    if (m) document.getElementById("side").value = m[1];
+  }
+  window.bevLoadDataUrl = url => { img.src = url; };   // used for testing
+  img.onload = () => {
+    document.getElementById("drop").hidden = true;
+    document.getElementById("wrap").hidden = false;
+    draw();
+  };
+
+  // canvas pixel (cx, cy) -> image coordinates with pixel centres at integers
+  const toImg = (cx, cy) => ({ u: cx / zoom() - 0.5, v: cy / zoom() - 0.5 });
+  const toCv = (u, v) => ({ x: (u + 0.5) * zoom(), y: (v + 0.5) * zoom() });
+
+  function draw() {
+    if (!img.naturalWidth) return;
+    const z = zoom();
+    cv.width = img.naturalWidth * z; cv.height = img.naturalHeight * z;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0, cv.width, cv.height);
+    pts.forEach((p, i) => {
+      const c = toCv(p.u, p.v);
+      ctx.strokeStyle = "#ff2d55"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(c.x, c.y, 9, 0, 2 * Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(c.x - 4, c.y); ctx.lineTo(c.x + 4, c.y);
+      ctx.moveTo(c.x, c.y - 4); ctx.lineTo(c.x, c.y + 4); ctx.stroke();
+      ctx.font = "bold 13px system-ui"; ctx.fillStyle = "#ff2d55";
+      ctx.fillText(String(i + 1), c.x + 11, c.y - 9);
+    });
+    if (hover) {
+      ctx.strokeStyle = "rgba(0,194,255,.8)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(hover.x, 0); ctx.lineTo(hover.x, cv.height);
+      ctx.moveTo(0, hover.y); ctx.lineTo(cv.width, hover.y); ctx.stroke();
+    }
+  }
+
+  function mousePos(e) {
+    const r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height };
+  }
+  function hit(m) {
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const c = toCv(pts[i].u, pts[i].v);
+      if (Math.hypot(c.x - m.x, c.y - m.y) < 10) return i;
+    }
+    return -1;
+  }
+  cv.addEventListener("mousedown", e => {
+    const m = mousePos(e), i = hit(m);
+    if (i >= 0) { dragging = i; return; }
+    const p = toImg(m.x, m.y);
+    pts.push({ u: p.u, v: p.v, fwd: "", out: "" });
+    renderRows(); draw();
+    const inputs = document.querySelectorAll("#rows tr:last-child input");
+    if (inputs.length) inputs[0].focus({ preventScroll: true });   // keep the image in view
+  });
+  cv.addEventListener("mousemove", e => {
+    const m = mousePos(e); hover = m;
+    const p = toImg(m.x, m.y);
+    document.getElementById("readout").textContent = "cursor: u " + p.u.toFixed(1) + ", v " + p.v.toFixed(1);
+    if (dragging >= 0) { pts[dragging].u = p.u; pts[dragging].v = p.v; renderRows(true); }
+    draw();
+  });
+  window.addEventListener("mouseup", () => { dragging = -1; });
+  cv.addEventListener("mouseleave", () => { hover = null; draw(); });
+  document.addEventListener("keydown", e => {
+    if (!pts.length || document.activeElement.tagName === "INPUT") return;
+    const p = pts[pts.length - 1], d = 0.5;
+    const k = { ArrowLeft: [-d, 0], ArrowRight: [d, 0], ArrowUp: [0, -d], ArrowDown: [0, d] }[e.key];
+    if (!k) return;
+    e.preventDefault(); p.u += k[0]; p.v += k[1]; renderRows(true); draw();
+  });
+
+  function renderRows(keepFocus) {
+    const tb = document.getElementById("rows");
+    if (keepFocus && tb.children.length === pts.length) {
+      pts.forEach((p, i) => {
+        tb.children[i].children[1].textContent = p.u.toFixed(1);
+        tb.children[i].children[2].textContent = p.v.toFixed(1);
+      });
+      update(); return;
+    }
+    tb.innerHTML = "";
+    pts.forEach((p, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + (i + 1) + "</td><td class='mono'>" + p.u.toFixed(1) + "</td><td class='mono'>" +
+        p.v.toFixed(1) + "</td><td><input inputmode='decimal' placeholder='-0.25'></td>" +
+        "<td><input inputmode='decimal' placeholder='0.35'></td><td><button>Delete</button></td>";
+      const [fi, oi] = tr.querySelectorAll("input");
+      fi.value = p.fwd; oi.value = p.out;
+      fi.addEventListener("input", () => { p.fwd = fi.value.trim(); update(); });
+      oi.addEventListener("input", () => { p.out = oi.value.trim(); update(); });
+      tr.querySelector("button").addEventListener("click", () => { pts.splice(i, 1); renderRows(); draw(); });
+      tb.appendChild(tr);
+    });
+    update();
+  }
+
+  function text() {
+    const s = side();
+    let t = "# Bird's-eye calibration points for the " + s + " camera, one marker per line:\n" +
+            "#   u_px  v_px  fwd_m  out_m\n# (made with bev_point_picker.html)\n";
+    pts.forEach(p => {
+      if (p.fwd !== "" && p.out !== "")
+        t += p.u.toFixed(1) + " " + p.v.toFixed(1) + " " + p.fwd + " " + p.out + "\n";
+    });
+    return t;
+  }
+
+  function update() {
+    const done = pts.filter(p => p.fwd !== "" && p.out !== "");
+    const bad = done.filter(p => isNaN(parseFloat(p.fwd)) || isNaN(parseFloat(p.out)) || parseFloat(p.out) <= 0);
+    let msg = "";
+    if (pts.length - done.length) msg += (pts.length - done.length) + " point(s) still need fwd and out. ";
+    if (bad.length) msg += "fwd/out must be numbers in metres and out must be > 0. ";
+    if (done.length < 4) msg += "Need at least 4 complete points (6+ recommended).";
+    document.getElementById("status").textContent = msg;
+    document.getElementById("out").value = text();
+  }
+
+  document.getElementById("file").addEventListener("change", e => loadFile(e.target.files[0]));
+  document.getElementById("zoom").addEventListener("change", draw);
+  document.getElementById("side").addEventListener("change", update);
+  const drop = document.body;
+  drop.addEventListener("dragover", e => e.preventDefault());
+  drop.addEventListener("drop", e => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); });
+  document.getElementById("copy").addEventListener("click", () => {
+    const ta = document.getElementById("out"); ta.select();
+    (navigator.clipboard ? navigator.clipboard.writeText(ta.value) : Promise.reject())
+      .catch(() => document.execCommand("copy"));
+  });
+  document.getElementById("download").addEventListener("click", () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text()], { type: "text/plain" }));
+    a.download = "bev_" + side() + "_points.txt"; a.click();
+  });
+  document.getElementById("clear").addEventListener("click", () => {
+    if (pts.length && confirm("Remove all points?")) { pts = []; renderRows(); draw(); }
+  });
+  update();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+%YAML:1.0
+---
+model: fisheye
+image_width: 420.
+image_height: 220.
+K: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 2.0275951801386938e+02, 0., 2.1049316075102942e+02, 0.,
+       1.4102231886949784e+02, 1.1299416571595327e+02, 0., 0., 1. ]
+D: !!opencv-matrix
+   rows: 4
+   cols: 1
+   dt: d
+   data: [ -3.3288139307683769e-02, -1.4872160101333525e-03, 0., 0. ]
