@@ -19,11 +19,34 @@ Currently, the model is still a placeholder. Data has not been collected. Data n
 Run from the repository root:
 
 ```text
-python3 model/early-fusion/train.py --data SensorFusion/data --output early_fusion.keras
+python3 model/early-fusion/train.py --data SensorFusion/data --output early_fusion.keras --tflite early_fusion.tflite
 ```
 
 The model predicts steering, throttle, and stop from the human-labeled
 training examples.
+
+### Training pipeline
+
+- **Validation split by session.** Whole sessions are held out per scenario
+  tag (`--val-fraction`, default 0.2), so near-identical frames from one lap
+  never appear in both train and validation. A tag needs at least 2 sessions
+  to appear in validation; with no validation sessions, early stopping falls
+  back to training loss.
+- **Sample filtering.** Rows with a missing camera or LiDAR are dropped
+  (`--keep-missing` keeps rows that still have one sensor, zero-filled), as
+  are rows whose camera/LiDAR timestamps differ by more than `--max-skew`
+  seconds (default 0.15).
+- **On-the-fly batches.** Images stay uint8 in memory (~60 KB/sample) and the
+  5-channel input is built per batch.
+- **Augmentation.** Each training sample is mirrored left/right with
+  probability 0.5 (image, LiDAR y, and steering sign flipped together;
+  `--no-flip` disables). `--sensor-dropout p` blanks the camera or the LiDAR
+  channels with probability p to train for sensor failure.
+- **Deployment.** The QCar's Python 3.6 cannot load a `.keras` file, so use
+  `--tflite` to export a TFLite model. `model.py`'s preprocessing
+  (`fuse`, `lidar_to_channels`) needs only numpy, so the car builds the same
+  input with `fuse(image[None], points[None], mask[None])`, where
+  `points, mask = fusion.pad(fusion.to_points(angles, distances))`.
 
 ## Model Design
 
@@ -45,6 +68,8 @@ The model is a supervised early-fusion driving model. It learns from captured dr
     5. Nearest LiDAR distance
 
 The LiDAR points from SensorFusion/fusion.py are converted into a fixed bird’s-eye-view grid. Valid points are marked as occupied, and the nearest point’s normalized distance is stored in each grid cell.
+
+The grid covers the 5 m × 10 m area in front of the car: forward is up and the car's left is on the left, the same left/right orientation as the camera. Points behind the car are dropped. Rows do not line up with camera rows, since the grid is a top-down view and not a projection into the image.
 
 ### Network
 

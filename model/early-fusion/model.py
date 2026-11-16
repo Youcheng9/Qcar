@@ -3,12 +3,13 @@
 The LiDAR points are rasterized into two bird's-eye-view channels and stacked
 with the camera image before the shared CNN, so this is an input-level early
 fusion model.
+
+The preprocessing functions (lidar_to_channels, fuse, make_early_fusion_input)
+only need numpy, so the car can build model inputs without TensorFlow; only
+build_model imports it.
 """
 
 import numpy as np
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
 
 
 IMAGE_WIDTH = 160
@@ -20,10 +21,11 @@ def lidar_to_channels(points, mask, width=IMAGE_WIDTH, height=IMAGE_HEIGHT):
     """Rasterize normalized car-frame LiDAR points into image-sized channels.
 
     ``points`` are the normalized values produced by SensorFusion/fusion.py:
-    x is forward and y is left, both approximately in [-1, 1].  The result is
-    not projected into the camera image; it is a fixed BEV representation that
-    lets the early-fusion network consume both sensors without camera
-    calibration.
+    x is forward and y is left, both approximately in [-1, 1].  The grid shows
+    the forward half-plane seen from above: forward is up, and the car's left
+    is on the left, matching the camera's left/right orientation.  Returns
+    behind the car (x < 0) are dropped rather than clipped onto the bottom row.
+    It is not a projection into camera pixels, so no calibration is needed.
     """
     points = np.asarray(points, dtype=np.float32)
     mask = np.asarray(mask, dtype=bool)
@@ -31,35 +33,44 @@ def lidar_to_channels(points, mask, width=IMAGE_WIDTH, height=IMAGE_HEIGHT):
     out = np.zeros((batch, height, width, LIDAR_CHANNELS), dtype=np.float32)
 
     for b in range(batch):
-        valid = mask[b] & np.isfinite(points[b]).all(axis=1)
-        p = points[b, valid]
+        p = points[b]
+        valid = (mask[b] & np.isfinite(p).all(axis=1)
+                 & (p[:, 0] >= 0.0) & (p[:, 0] <= 1.0) & (np.abs(p[:, 1]) <= 1.0))
+        p = p[valid]
         if len(p) == 0:
             continue
 
-        # x: forward [0, 1] -> image rows; y: left [-1, 1] -> image columns.
-        x = np.clip(p[:, 0], 0.0, 1.0)
-        y = np.clip(p[:, 1], -1.0, 1.0)
-        row = np.clip(((1.0 - x) * (height - 1)).astype(np.int32), 0, height - 1)
-        col = np.clip(((y + 1.0) * 0.5 * (width - 1)).astype(np.int32), 0, width - 1)
+        # x: forward [0, 1] -> rows (far = top); y: left [1, -1] -> columns (left = 0).
+        # Equal-width cells make negating y exactly mirror the columns, like a flipped image.
+        row = np.minimum((1.0 - p[:, 0]) * height, height - 1).astype(np.int32)
+        col = np.minimum((1.0 - p[:, 1]) * 0.5 * width, width - 1).astype(np.int32)
 
-        # Multiple points can land in one cell; retain occupancy and nearest range.
-        distance = np.sqrt(p[:, 0] ** 2 + p[:, 1] ** 2)
-        for r, c, d in zip(row, col, distance):
-            out[b, r, c, 0] = 1.0
-            if out[b, r, c, 1] == 0.0 or d < out[b, r, c, 1]:
-                out[b, r, c, 1] = d
+        # Multiple points can land in one cell; keep occupancy and nearest range.
+        nearest = np.full((height, width), np.inf, dtype=np.float32)
+        np.minimum.at(nearest, (row, col), np.hypot(p[:, 0], p[:, 1]))
+        hit = np.isfinite(nearest)
+        out[b, :, :, 0] = hit
+        out[b, :, :, 1] = np.where(hit, nearest, 0.0)
     return out
+
+
+def fuse(images, points, mask):
+    """BGR uint8 images (N, H, W, 3) + padded points/mask -> (N, H, W, 5) float32."""
+    image = np.asarray(images).astype(np.float32) / 255.0
+    lidar = lidar_to_channels(points, mask, width=image.shape[2], height=image.shape[1])
+    return np.concatenate([image, lidar], axis=-1)
 
 
 def make_early_fusion_input(data):
     """Return the five-channel input expected by the early-fusion CNN."""
-    image = data['image'].astype(np.float32) / 255.0
-    lidar = lidar_to_channels(data['points'], data['mask'])
-    return np.concatenate([image, lidar], axis=-1)
+    return fuse(data['image'], data['points'], data['mask'])
 
 
 def build_model(input_shape=(IMAGE_HEIGHT, IMAGE_WIDTH, 3 + LIDAR_CHANNELS)):
     """Create a model predicting steering, throttle, and stop from fused data."""
+    from tensorflow import keras
+    from tensorflow.keras import layers
+
     inputs = keras.Input(shape=input_shape, name='camera_lidar')
     x = layers.Conv2D(24, 5, strides=2, padding='same', activation='relu')(inputs)
     x = layers.BatchNormalization()(x)
