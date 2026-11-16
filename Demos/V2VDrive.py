@@ -69,7 +69,9 @@ def drive(args):
 
             link.update_state(
                 throttle=throttle, steering=steering, mode="auto",
-                brake=(throttle == 0.0), turn_signal=turn_signal(steering))
+                brake=False,  # we never brake on our own here; reporting the
+                # V2V-forced stop would make two cars hold each other stopped
+                turn_signal=turn_signal(steering))
             sdt.write_qcar(qcar, throttle, steering, leds)
 
             remaining = period - (time.time() - loop_start)
