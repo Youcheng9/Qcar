@@ -87,7 +87,7 @@ def main():
     print('Recording to', folder)
 
     steering = pedal = brake = 0.0
-    max_throttle, reverse = .075, False
+    max_throttle, reverse = .2, False   # same start as DataCollectionServer.py; the H-shifter (11-17) changes it
     throttle_scale = 0.4 if args.control == 'xbox' else 1.0
     period, next_sample = 1.0 / args.hz, time.time()
     threading.Thread(target=lidar_loop, daemon=True).start()
