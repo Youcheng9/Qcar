@@ -9,6 +9,18 @@ import fusion
 
 
 class TestFusion(unittest.TestCase):
+    def test_should_stop_requires_multiple_close_forward_returns(self):
+        angles = np.array([fusion.FRONT - 0.1, fusion.FRONT, fusion.FRONT + 0.1])
+        self.assertTrue(fusion.should_stop(angles, [0.4, 0.3, 0.4]))
+        self.assertFalse(fusion.should_stop(angles[:2], [0.4, 0.3]))
+        self.assertFalse(fusion.should_stop(angles, [0.8, 0.8, 0.8]))
+
+    def test_safe_throttle_only_overrides_forward_motion(self):
+        angles = [fusion.FRONT - 0.1, fusion.FRONT, fusion.FRONT + 0.1]
+        distances = [0.4, 0.3, 0.4]
+        self.assertEqual(fusion.safe_throttle(0.05, angles, distances), 0.0)
+        self.assertEqual(fusion.safe_throttle(-0.05, angles, distances), -0.05)
+
     def test_to_points_orientation(self):
         # raw angle FRONT -> straight ahead; raw angles grow clockwise, so FRONT - 90deg is left
         pts = fusion.to_points([fusion.FRONT, fusion.FRONT - np.pi / 2], [1.0, 2.0])

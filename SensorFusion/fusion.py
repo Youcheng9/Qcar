@@ -24,6 +24,23 @@ MAX_POINTS = 384     # Lidar(numMeasurements=384) on the QCar
 MIN_RANGE = 0.15     # m; RPLidar returns 0 for "no return", and the car body sits inside this
 MAX_RANGE = 5.0      # m; indoor track, farther returns are walls. Also the normalization scale.
 FRONT = np.pi / 2    # raw LiDAR angle that points straight ahead; raw angles grow clockwise.
+
+
+def should_stop(angles, distances, stop_distance=0.45,
+                corridor_half_width=0.35, min_returns=3):
+    """Return True when several LiDAR returns block the corridor ahead."""
+    points = to_points(angles, distances, max_range=stop_distance)
+    if len(points) == 0:
+        return False
+    blocked = (points[:, 0] > 0.0) & (np.abs(points[:, 1]) <= corridor_half_width)
+    return int(np.count_nonzero(blocked)) >= min_returns
+
+
+def safe_throttle(throttle, angles, distances, **stop_kwargs):
+    """Override forward throttle with zero when the LiDAR corridor is blocked."""
+    if float(throttle) > 0.0 and should_stop(angles, distances, **stop_kwargs):
+        return 0.0
+    return float(throttle)
                      # Matches TestFusion.py (front = 70..110 deg, left = 60..90 deg).
                      # Verify with lidar_check.py before collecting.
 
